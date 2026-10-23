@@ -31,21 +31,21 @@ public static class FavoriteStars
         ConnectionStrings.Clear();
         try
         {
-            var appId = MyGameService.AppId;
+            // No app id check: favorites added from Steam's own server browser have app id 0.
+            // Addresses of other games' servers never match a row anyway.
             var count = SteamMatchmaking.GetFavoriteGameCount();
             for (var i = 0; i < count; i++)
             {
                 if (
                     SteamMatchmaking.GetFavoriteGame(
                         i,
-                        out var gameAppId,
+                        out _,
                         out var ip,
                         out var port,
                         out _,
                         out var flags,
                         out _
                     )
-                    && gameAppId.m_AppId == appId
                     && (flags & FavoriteFlag) != 0
                 )
                 {
