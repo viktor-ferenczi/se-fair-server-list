@@ -6,9 +6,9 @@ Join Game server list treat every server the same.
 ## What it changes
 
 - **No pinned "recommended" servers.** The game downloads a list of servers from Keen
-  (`rankedServers.xml`), marks them with a star and keeps them on top of the Servers, Favorites
-  and History tables, whatever column you sort by. With the plugin they get no star and sort
-  like any other server.
+  (`rankedServers.xml`), marks them with a star and keeps them on top of the Servers, Favorites,
+  History, LAN and Friends tables, whatever column you sort by. With the plugin they get no star
+  and sort like any other server.
 - **Sorted by player count.** The tables open sorted by player count, busiest first, instead of
   by ping. Click a column header to sort by world, game mode, server name, players, ping or mod
   size, and click it again to reverse the order, as before.
