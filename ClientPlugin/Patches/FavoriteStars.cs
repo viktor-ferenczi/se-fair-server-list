@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Xml.Serialization;
 using HarmonyLib;
 using Sandbox.Engine.Networking;
 using Sandbox.Game.Gui;
@@ -35,14 +36,15 @@ public static class FavoriteStars
     // Addresses on the Steam favorites list
     private static readonly HashSet<string> ConnectionStrings = new();
 
-    // Server and world name last seen at each favorite address, kept between sessions
+    // Server and world name last seen at each favorite address, tab separated,
+    // kept between sessions in FairServerList.favorites.xml
     private static readonly Dictionary<string, string> NameByAddress = new();
 
     // Names of the servers with at least one address on the Steam favorites list
     private static readonly HashSet<string> Names = new();
 
     private static string NamesPath =>
-        Path.Combine(MyFileSystem.UserDataPath, "Storage", "FairServerList.favorites.txt");
+        Path.Combine(MyFileSystem.UserDataPath, "Storage", "FairServerList.favorites.xml");
 
     private static bool namesLoaded;
 
@@ -180,7 +182,11 @@ public static class FavoriteStars
         CellToolTip(cell) = favorite ? new MyToolTips(ToolTipText) : null;
     }
 
-    // One line per address: connection string, server name, world name, tab separated
+    private static readonly XmlSerializer NamesSerializer = new(
+        typeof(List<FavoriteServer>),
+        new XmlRootAttribute("FavoriteServers")
+    );
+
     private static void LoadNames()
     {
         if (namesLoaded)
@@ -192,11 +198,11 @@ public static class FavoriteStars
             if (!File.Exists(NamesPath))
                 return;
 
-            foreach (var line in File.ReadAllLines(NamesPath))
+            using var stream = File.OpenRead(NamesPath);
+            foreach (var server in (List<FavoriteServer>)NamesSerializer.Deserialize(stream))
             {
-                var parts = line.Split(new[] { '\t' }, 2);
-                if (parts.Length == 2)
-                    NameByAddress[parts[0]] = parts[1];
+                if (server.Address != null && server.Name != null && server.World != null)
+                    NameByAddress[server.Address] = server.Name + "\t" + server.World;
             }
         }
         catch (Exception e)
@@ -211,11 +217,22 @@ public static class FavoriteStars
     {
         try
         {
+            var servers = NameByAddress
+                .Select(pair =>
+                {
+                    var names = pair.Value.Split('\t');
+                    return new FavoriteServer
+                    {
+                        Address = pair.Key,
+                        Name = names[0],
+                        World = names[1],
+                    };
+                })
+                .ToList();
+
             Directory.CreateDirectory(Path.GetDirectoryName(NamesPath)!);
-            File.WriteAllLines(
-                NamesPath,
-                NameByAddress.Select(pair => pair.Key + "\t" + pair.Value)
-            );
+            using var stream = File.Create(NamesPath);
+            NamesSerializer.Serialize(stream, servers);
         }
         catch (Exception e)
         {
@@ -224,6 +241,19 @@ public static class FavoriteStars
             );
         }
     }
+}
+
+// One entry of FairServerList.favorites.xml: the server and world name last seen at a favorite address
+public class FavoriteServer
+{
+    [XmlAttribute]
+    public string Address;
+
+    [XmlAttribute]
+    public string Name;
+
+    [XmlAttribute]
+    public string World;
 }
 
 [HarmonyPatch(typeof(MyGuiControlTable), nameof(MyGuiControlTable.Add))]
