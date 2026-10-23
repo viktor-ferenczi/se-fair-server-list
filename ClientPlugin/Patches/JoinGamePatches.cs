@@ -6,8 +6,8 @@ using VRage.GameServices;
 namespace ClientPlugin.Patches;
 
 // Keen marks the servers listed in rankedServers.xml as "recommended": they get a star
-// and are pinned to the top of the Servers, Favorites and History tables, whatever the
-// sort column. Treating every server as unranked removes both.
+// and are pinned to the top of the Servers, Favorites, History, LAN and Friends tables,
+// whatever the sort column. Treating every server as unranked removes both.
 [HarmonyPatch(typeof(MyGuiScreenJoinGame), "IsRanked", typeof(MyGameServerItem))]
 // ReSharper disable once UnusedType.Global
 public static class IsRankedPatch
