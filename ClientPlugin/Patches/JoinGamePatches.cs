@@ -7,7 +7,8 @@ namespace ClientPlugin.Patches;
 
 // Keen marks the servers listed in rankedServers.xml as "recommended": they get a star
 // and are pinned to the top of the Servers, Favorites, History, LAN and Friends tables,
-// whatever the sort column. Treating every server as unranked removes both.
+// whatever the sort column. Treating every server as unranked removes both. The star is
+// reused for the player's favorite servers, see FavoriteStars.
 [HarmonyPatch(typeof(MyGuiScreenJoinGame), "IsRanked", typeof(MyGameServerItem))]
 // ReSharper disable once UnusedType.Global
 public static class IsRankedPatch
@@ -34,6 +35,8 @@ public static class InitServersTablePatch
     // ReSharper disable once InconsistentNaming
     public static void Postfix(MyGuiControlTable ___m_gamesTable)
     {
+        FavoriteStars.Reload();
+
         // PlayerCountComparison is written in reverse, so the first (ascending)
         // sort of that column puts the most players on top.
         ___m_gamesTable.SortByColumn(PlayersColumn);
