@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using HarmonyLib;
@@ -8,26 +10,48 @@ using Sandbox.Game.Gui;
 using Sandbox.Graphics.GUI;
 using Steamworks;
 using VRage;
+using VRage.FileSystem;
 using VRage.GameServices;
 using VRage.Input;
+using VRage.Utils;
 
 namespace ClientPlugin.Patches;
 
 // The star in the first column of the server tables marks the player's favorite servers
 // instead of Keen's "recommended" ones. Only the Steam favorites are read; servers
 // favorited through EOS (crossplay) get no star.
+//
+// Steam keeps favorites by address only. The server and world name seen at each favorite
+// address is remembered, so a favorite server that moves to a new address is still
+// recognized. It gets the star, and its new address is added to the Steam favorites, which
+// brings it back on the Favorites tab. The server name alone is not enough: many networks
+// call their entry server "Lobby".
 public static class FavoriteStars
 {
     private const string ToolTipText = "Favorite server";
+    private const string SteamPrefix = "steam://";
     private const uint FavoriteFlag = 1; // k_unFavoriteFlagFavorite; 2 is the history flag
 
+    // Addresses on the Steam favorites list
     private static readonly HashSet<string> ConnectionStrings = new();
+
+    // Server and world name last seen at each favorite address, kept between sessions
+    private static readonly Dictionary<string, string> NameByAddress = new();
+
+    // Names of the servers with at least one address on the Steam favorites list
+    private static readonly HashSet<string> Names = new();
+
+    private static string NamesPath =>
+        Path.Combine(MyFileSystem.UserDataPath, "Storage", "FairServerList.favorites.txt");
+
+    private static bool namesLoaded;
 
     private static readonly AccessTools.FieldRef<MyGuiControlTable.Cell, MyToolTips> CellToolTip =
         AccessTools.FieldRefAccess<MyGuiControlTable.Cell, MyToolTips>("ToolTip");
 
     public static void Reload()
     {
+        LoadNames();
         ConnectionStrings.Clear();
         try
         {
@@ -53,7 +77,7 @@ public static class FavoriteStars
                         IPAddressExtensions.FromIPv4NetworkOrder(ip),
                         port
                     );
-                    ConnectionStrings.Add("steam://" + endpoint);
+                    ConnectionStrings.Add(SteamPrefix + endpoint);
                 }
             }
         }
@@ -61,10 +85,86 @@ public static class FavoriteStars
         {
             // Steam is not available (offline client), there are no favorites to show
         }
+
+        Names.Clear();
+        foreach (var address in ConnectionStrings)
+        {
+            if (NameByAddress.TryGetValue(address, out var name))
+                Names.Add(name);
+        }
     }
 
-    public static bool IsFavorite(MyGameServerItem server) =>
-        server.ConnectionString != null && ConnectionStrings.Contains(server.ConnectionString);
+    private static string NameOf(MyGameServerItem server) =>
+        string.IsNullOrWhiteSpace(server.Name) || string.IsNullOrWhiteSpace(server.Map)
+            ? null
+            : Clean(server.Name) + "\t" + Clean(server.Map);
+
+    private static string Clean(string text) =>
+        text.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
+
+    public static bool IsFavorite(MyGameServerItem server)
+    {
+        if (server.ConnectionString == null)
+            return false;
+
+        if (ConnectionStrings.Contains(server.ConnectionString))
+            return true;
+
+        // Only Steam favorites are read back, so only Steam servers can follow by name
+        if (!server.ConnectionString.StartsWith(SteamPrefix))
+            return false;
+
+        var name = NameOf(server);
+        return name != null && Names.Contains(name);
+    }
+
+    // Remembers the name of a server at a favorite address, or adds the new address of a
+    // favorite server that moved to the Steam favorites
+    private static void Track(MyGameServerItem server)
+    {
+        var name = NameOf(server);
+        if (name == null)
+            return;
+
+        if (!ConnectionStrings.Contains(server.ConnectionString))
+        {
+            MyGameService.AddFavoriteGame(server);
+            ConnectionStrings.Add(server.ConnectionString);
+        }
+
+        if (NameByAddress.TryGetValue(server.ConnectionString, out var known) && known == name)
+            return;
+
+        NameByAddress[server.ConnectionString] = name;
+        Names.Add(name);
+        SaveNames();
+    }
+
+    public static void Add(MyGameServerItem server)
+    {
+        MyGameService.AddFavoriteGame(server);
+        Reload();
+        Track(server);
+    }
+
+    // Removes every address the server was seen at from the Steam favorites,
+    // otherwise its name would bring it back
+    public static void Remove(MyGameServerItem server)
+    {
+        var name = NameOf(server);
+        var addresses = NameByAddress
+            .Where(pair => name != null && pair.Value == name)
+            .Select(pair => pair.Key)
+            .Append(server.ConnectionString)
+            .Where(ConnectionStrings.Contains)
+            .Distinct()
+            .ToList();
+
+        foreach (var address in addresses)
+            MyGameService.RemoveFavoriteGame(new MyGameServerItem { ConnectionString = address });
+
+        Reload();
+    }
 
     public static void Mark(MyGuiControlTable.Row row)
     {
@@ -72,9 +172,57 @@ public static class FavoriteStars
             return;
 
         var favorite = IsFavorite(server);
+        if (favorite)
+            Track(server);
+
         var cell = row.GetCell(0);
         cell.Icon = favorite ? MyGuiConstants.TEXTURE_ICON_STAR : null;
         CellToolTip(cell) = favorite ? new MyToolTips(ToolTipText) : null;
+    }
+
+    // One line per address: connection string, server name, world name, tab separated
+    private static void LoadNames()
+    {
+        if (namesLoaded)
+            return;
+        namesLoaded = true;
+
+        try
+        {
+            if (!File.Exists(NamesPath))
+                return;
+
+            foreach (var line in File.ReadAllLines(NamesPath))
+            {
+                var parts = line.Split(new[] { '\t' }, 2);
+                if (parts.Length == 2)
+                    NameByAddress[parts[0]] = parts[1];
+            }
+        }
+        catch (Exception e)
+        {
+            MyLog.Default.WriteLine(
+                $"{Plugin.Name}: Cannot load the names of the favorite servers: {e}"
+            );
+        }
+    }
+
+    private static void SaveNames()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(NamesPath)!);
+            File.WriteAllLines(
+                NamesPath,
+                NameByAddress.Select(pair => pair.Key + "\t" + pair.Value)
+            );
+        }
+        catch (Exception e)
+        {
+            MyLog.Default.WriteLine(
+                $"{Plugin.Name}: Cannot save the names of the favorite servers: {e}"
+            );
+        }
     }
 }
 
@@ -162,10 +310,9 @@ public static class ServerContextMenuPatch
                 return true;
 
             if (item.Remove)
-                MyGameService.RemoveFavoriteGame(item.Server);
+                FavoriteStars.Remove(item.Server);
             else
-                MyGameService.AddFavoriteGame(item.Server);
-            FavoriteStars.Reload();
+                FavoriteStars.Add(item.Server);
 
             if (item.Remove && __instance.SelectedPage == ___m_favoritesPage)
             {

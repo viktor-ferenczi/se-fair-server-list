@@ -12,6 +12,11 @@ Join Game server list treat every server the same.
 - **Stars mark your favorites.** The star in the first column now marks the servers on your Steam
   favorites list. Right click a server to add it to your favorites, or to remove it if it has a
   star, on any tab. The star appears or disappears at once.
+- **Favorites follow servers that move.** Steam remembers a favorite by its address only. The
+  plugin also remembers its server and world name, so when a favorite server comes back at a new
+  address it still gets the star, and the new address is added to your favorites, which puts it
+  back on the Favorites tab. The server name alone isn't enough, since many networks call their
+  entry server "Lobby". Removing a favorite removes all the addresses it was seen at.
 - **Sorted by player count.** The tables open sorted by player count, busiest first, instead of
   by ping. Click a column header to sort by world, game mode, server name, players, ping or mod
   size, and click it again to reverse the order, as before.
